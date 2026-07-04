@@ -8,14 +8,15 @@ Visualize SYNOP cloud observations over Argentina in Google Colab.
 2. Run all cells.
 3. Adjust `START_UTC` / `END_UTC` in the configuration cell.
 
-The notebook downloads Argentina SYNOP data from [OGIMET](http://www.ogimet.com/) and extracts **cloud base height**:
+The notebook downloads Argentina SYNOP data from [OGIMET](http://www.ogimet.com/) and extracts **cloud base height** from SYNOP Section 3 groups `8NChh`:
 
 | Field | Meaning | Units |
 |-------|---------|-------|
-| `cloud_base_m` / `HKm` | Lowest cloud base height | meters / km |
-| `cloud_base_ft` | Same value | feet (`m × 3.28084`) |
+| `cloud_base_hh` | Height code from group `8NChh` | hundreds of feet |
+| `cloud_base_ft` | `hh × 100` | feet |
+| `cloud_base_m` | Derived from feet | meters |
 
-If OGIMET decoded tables are empty (common for the current day), the notebook automatically falls back to the raw SYNOP API.
+Cloud base is parsed from raw SYNOP bulletins. OGIMET decoded hourly tables are only used as a fallback when no Section 3 cloud layers are present.
 
 ## Data sources
 
