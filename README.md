@@ -28,6 +28,7 @@ Station map coordinates are parsed directly from OGIMET `Lat=DD-MM-SS` / `Lon=DD
 ## Roadmap
 
 - [x] Basic SYNOP retrieval for Argentina
-- [ ] Map plotting with consistent styling
-- [ ] Spatial interpolation over Argentina territory
-- [ ] Time slider / latest-observation mode
+- [x] Correct station coordinates from OGIMET DMS metadata
+- [x] Time selector (default: latest available UTC hour)
+- [x] Spatial interpolation (`contourf`) clipped to Argentina
+- [ ] Kriging / finer grid options
