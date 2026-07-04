@@ -18,6 +18,8 @@ The notebook downloads Argentina SYNOP data from [OGIMET](http://www.ogimet.com/
 
 Cloud base is parsed from raw SYNOP bulletins. OGIMET decoded hourly tables are only used as a fallback when no Section 3 cloud layers are present.
 
+Station map coordinates are parsed directly from OGIMET `Lat=DD-MM-SS` / `Lon=DDD-MM-SS` metadata. The `atmofetch.stations_ogimet()` helper mis-parses these strings and can place stations tens of km off (sea / neighboring countries).
+
 ## Data sources
 
 - **OGIMET** (`state=Argen`, WMO block `87xxx`) — free raw SYNOP bulletins
