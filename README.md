@@ -15,6 +15,7 @@ The notebook downloads Argentina SYNOP data from [OGIMET](http://www.ogimet.com/
 | `cloud_base_hh` | Height code from group `8NChh` | hundreds of feet |
 | `cloud_base_ft` | `hh × 100` | feet |
 | `cloud_base_m` | Derived from feet | meters |
+| `cloud_type` / `cloud_type_description` | `C` code in `8NChh` (WMO Table 19) | e.g. Sc, Cumulonimbus |
 
 Cloud base is parsed from raw SYNOP bulletins. OGIMET decoded hourly tables are only used as a fallback when no Section 3 cloud layers are present.
 
