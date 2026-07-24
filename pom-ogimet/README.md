@@ -4,13 +4,18 @@ Herramienta web **autocontenida** para compartir con el equipo: un solo archivo 
 
 ## Sin Python: usar el HTML que ya está en el repo
 
-**No hace falta instalar nada** para usar la herramienta. El archivo ya está generado:
+**No hace falta instalar nada** para usar la herramienta. El archivo ya está generado con **estaciones + SYNOP de las últimas horas embebidos** (funciona aunque OGIMET bloquee CORS desde `file://`):
 
-1. Descargá [`index.html`](https://github.com/negrofei/cloudVis/blob/pom-ogimet/pom-ogimet/index.html) desde GitHub (botón **Download** o **Raw** → guardar como).
+1. Descargá [`index.html`](https://github.com/negrofei/cloudVis/blob/pom-ogimet/pom-ogimet/index.html) desde GitHub (botón **Download**).
 2. Abrilo con **Chrome** o **Firefox**.
-3. Clic en una estación → SYNOP de OGIMET + AEROMET decodificado.
+3. Clic en una estación → AEROMET al instante (datos embebidos). Si la red/proxy funciona, intenta actualizar en vivo.
 
-Los SYNOP en vivo se consultan desde el navegador a [OGIMET](http://www.ogimet.com/cgi-bin/getsynop). Solo las **coordenadas de estaciones** quedan fijas en el HTML (se actualizan si regenerás el archivo).
+**Zoom del mapa:** rueda del mouse o botones +/- en la barra de Plotly (arriba a la derecha del mapa).
+
+**Debug de red:** activá «Mostrar debug de red» en el panel derecho. La cadena de llamadas es:
+`selectStation()` → `fetchSynops()` → `fetchText()` → OGIMET (o proxy CORS).
+
+OGIMET no permite `fetch` directo desde `file://` (origen `null`); eso es normal. Los datos embebidos evitan depender de la red.
 
 ---
 

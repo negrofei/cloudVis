@@ -136,6 +136,24 @@
     .status.loading { background: #1e3a5f; color: var(--accent); }
     .status.error { background: #4a2020; color: #ff8a8a; }
     .status.ok { background: #1a3d2e; color: var(--ok); }
+    .debug-panel {
+      font-family: monospace;
+      font-size: 0.68rem;
+      color: var(--muted);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px;
+      margin-bottom: 12px;
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 160px;
+      overflow-y: auto;
+      display: none;
+    }
+    .debug-panel.visible { display: block; }
+    .debug-toggle { font-size: 0.75rem; color: var(--muted); cursor: pointer; margin-bottom: 8px; }
+    .debug-toggle input { margin-right: 6px; }
   </style>
 </head>
 <body>
@@ -159,6 +177,8 @@
         Hacé clic en un punto del mapa para cargar los SYNOP de las últimas
         <span id="hoursLabel">__DEFAULT_HOURS__</span> horas y ver el AEROMET decodificado.
       </div>
+      <label class="debug-toggle"><input type="checkbox" id="debugToggle" /> Mostrar debug de red</label>
+      <pre id="debugPanel" class="debug-panel"></pre>
       <div id="reports"></div>
     </aside>
   </main>
@@ -168,10 +188,41 @@
   </script>
   <script>
     const STATIONS = __STATIONS_JSON__;
+    const EMBEDDED_SYNOPS = __EMBEDDED_SYNOPS_JSON__;
     const OGIMET_URL = "https://www.ogimet.com/cgi-bin/getsynop";
-    const CORS_PROXY = "https://api.allorigins.win/raw?url=";
+
+    // OGIMET no envía cabeceras CORS → desde file:// o cualquier web app hay que usar proxy.
+    const CORS_PROXIES = [
+      (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+      (url) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+      (url) => `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(url)}`,
+    ];
 
     let selectedStation = null;
+    let mapInitialized = false;
+    let mapView = { center: { lat: -38.5, lon: -63.5 }, zoom: 3.4 };
+    const plotConfig = {
+      responsive: true,
+      displayModeBar: true,
+      scrollZoom: true,
+      doubleClick: "reset",
+      modeBarButtonsToRemove: [],
+    };
+
+    function debugLog(...lines) {
+      const panel = document.getElementById("debugPanel");
+      const ts = new Date().toISOString().slice(11, 19);
+      panel.textContent += `[${ts}] ${lines.join("\n")}\n`;
+      panel.scrollTop = panel.scrollHeight;
+    }
+
+    function clearDebug() {
+      document.getElementById("debugPanel").textContent = "";
+    }
+
+    document.getElementById("debugToggle").addEventListener("change", (ev) => {
+      document.getElementById("debugPanel").classList.toggle("visible", ev.target.checked);
+    });
 
     function pad(n) { return String(n).padStart(2, "0"); }
 
@@ -190,14 +241,63 @@
     }
 
     async function fetchText(url) {
+      const isFile = location.protocol === "file:" || location.origin === "null";
+      debugLog(`fetchText() → ${url}`);
+      if (isFile) {
+        debugLog("  origen file:// — se omite fetch directo (CORS bloqueado)");
+      } else {
+        try {
+          debugLog("  intento 1: fetch directo a OGIMET");
+          const res = await fetch(url);
+          if (res.ok) {
+            debugLog("  ✓ fetch directo OK");
+            return await res.text();
+          }
+          debugLog(`  ✗ fetch directo HTTP ${res.status}`);
+        } catch (err) {
+          debugLog(`  ✗ fetch directo: ${err.message}`);
+        }
+      }
+
+      let lastError = null;
+      for (let i = 0; i < CORS_PROXIES.length; i += 1) {
+        const proxyUrl = CORS_PROXIES[i](url);
+        try {
+          debugLog(`  intento ${i + 2}: proxy ${proxyUrl.slice(0, 60)}…`);
+          const res = await fetch(proxyUrl);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const text = await res.text();
+          if (!text || text.length < 20) throw new Error("respuesta vacía");
+          debugLog(`  ✓ proxy ${i + 1} OK (${text.length} bytes)`);
+          return text;
+        } catch (err) {
+          lastError = err;
+          debugLog(`  ✗ proxy ${i + 1}: ${err.message}`);
+        }
+      }
+
+      // allorigins JSON fallback
       try {
-        const res = await fetch(url);
-        if (res.ok) return await res.text();
-      } catch (_) { /* CORS or network */ }
-      const proxied = CORS_PROXY + encodeURIComponent(url);
-      const res = await fetch(proxied);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return await res.text();
+        const jsonUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+        debugLog(`  intento final: allorigins JSON`);
+        const res = await fetch(jsonUrl);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const payload = await res.json();
+        if (payload.contents) {
+          debugLog(`  ✓ allorigins JSON OK (${payload.contents.length} bytes)`);
+          return payload.contents;
+        }
+        throw new Error("sin campo contents");
+      } catch (err) {
+        debugLog(`  ✗ allorigins JSON: ${err.message}`);
+        lastError = err;
+      }
+
+      throw new Error(
+        `No se pudo consultar OGIMET (${lastError?.message || "red"}). `
+        + "Activá «Mostrar debug de red» para ver el detalle. "
+        + "Cadena: selectStation() → fetchSynops() → fetchText()."
+      );
     }
 
     async function fetchSynops(wmoId, hoursBack) {
@@ -207,8 +307,45 @@
         begin, end, ind, header: "yes", lang: "eng",
       });
       const url = `${OGIMET_URL}?${params}`;
+      debugLog(`fetchSynops(wmoId=${wmoId}, hours=${hoursBack})`);
+      debugLog(`  ind OGIMET=${ind}, rango UTC ${begin}–${end}`);
       const csv = await fetchText(url);
-      return parseOgimetCsv(csv).filter((row) => row.wmoId === wmoId);
+      const rows = parseOgimetCsv(csv).filter((row) => row.wmoId === wmoId);
+      debugLog(`  parseOgimetCsv → ${rows.length} parte(s) para ${wmoId}`);
+      return rows;
+    }
+
+    function embeddedRows(wmoId, hoursBack) {
+      const rows = EMBEDDED_SYNOPS[wmoId] || [];
+      const cutoff = Date.now() - hoursBack * 3600 * 1000;
+      return rows
+        .filter((r) => {
+          const t = Date.UTC(r.year, r.month - 1, r.day, r.hour, r.minute);
+          return t >= cutoff;
+        })
+        .map((r) => ({
+          ...r,
+          wmoId,
+          datetimeUtc: new Date(Date.UTC(r.year, r.month - 1, r.day, r.hour, r.minute)),
+        }));
+    }
+
+    function renderReports(rows, station, sourceLabel) {
+      const container = document.getElementById("reports");
+      container.innerHTML = "";
+      rows.forEach((row) => {
+        const decoded = synopToAeromet(row.report, station.name, station.alt || 0);
+        const card = document.createElement("div");
+        card.className = "report-card";
+        const ts = row.datetimeUtc.toISOString().replace("T", " ").slice(0, 16) + " UTC";
+        card.innerHTML = `
+          <time>${ts}</time>
+          <div class="aeromet">${decoded.aeromet}</div>
+          <div class="synop-raw">${decoded.raw}</div>
+        `;
+        container.appendChild(card);
+      });
+      setStatus("ok", `${rows.length} parte(s) — ${sourceLabel}`);
     }
 
     function renderMap() {
@@ -230,16 +367,33 @@
       const layout = {
         mapbox: {
           style: "open-street-map",
-          center: { lat: -38.5, lon: -63.5 },
-          zoom: 3.4,
+          center: { ...mapView.center },
+          zoom: mapView.zoom,
         },
         margin: { t: 0, b: 0, l: 0, r: 0 },
         paper_bgcolor: "#0f1419",
         plot_bgcolor: "#0f1419",
         font: { color: "#e8eef7" },
+        dragmode: "pan",
+        uirevision: "argentina-map",
       };
 
-      Plotly.newPlot("map", [trace], layout, { responsive: true, displayModeBar: true });
+      if (mapInitialized) {
+        Plotly.react("map", [trace], layout, plotConfig);
+      } else {
+        Plotly.newPlot("map", [trace], layout, plotConfig);
+        mapInitialized = true;
+        const mapEl = document.getElementById("map");
+        mapEl.on("plotly_relayout", (ev) => {
+          if (ev["mapbox.zoom"] != null) mapView.zoom = ev["mapbox.zoom"];
+          if (ev["mapbox.center"]) {
+            mapView.center = { lat: ev["mapbox.center"].lat, lon: ev["mapbox.center"].lon };
+          }
+          if (ev["mapbox.center.lat"] != null) {
+            mapView.center = { lat: ev["mapbox.center.lat"], lon: ev["mapbox.center.lon"] };
+          }
+        });
+      }
 
       document.getElementById("map").on("plotly_click", (ev) => {
         const idx = ev.points[0].pointIndex;
@@ -264,30 +418,41 @@
         + (station.alt != null ? ` · ${station.alt} m` : "")
       );
       document.getElementById("reports").innerHTML = "";
-      setStatus("loading", `Cargando SYNOP (últimas ${hours} h)…`);
+      clearDebug();
+      if (document.getElementById("debugToggle").checked) {
+        debugLog(`selectStation("${station.name}", wmo=${station.wmo_id})`);
+      }
+
+      const cached = embeddedRows(station.wmo_id, hours);
+      if (cached.length) {
+        debugLog(`  caché embebido: ${cached.length} parte(s)`);
+        renderReports(cached, station, "datos embebidos (sin red)");
+      } else {
+        setStatus("loading", `Cargando SYNOP (últimas ${hours} h)…`);
+      }
 
       try {
+        debugLog("  intentando actualización en vivo vía fetchSynops()…");
         const rows = await fetchSynops(station.wmo_id, hours);
-        if (!rows.length) {
-          setStatus("error", "No hay SYNOP en el intervalo seleccionado.");
+        if (rows.length) {
+          renderReports(rows, station, "OGIMET en vivo");
           return;
         }
-        setStatus("ok", `${rows.length} parte(s) encontrada(s).`);
-        const container = document.getElementById("reports");
-        rows.forEach((row) => {
-          const decoded = synopToAeromet(row.report, station.name, station.alt || 0);
-          const card = document.createElement("div");
-          card.className = "report-card";
-          const ts = row.datetimeUtc.toISOString().replace("T", " ").slice(0, 16) + " UTC";
-          card.innerHTML = `
-            <time>${ts}</time>
-            <div class="aeromet">${decoded.aeromet}</div>
-            <div class="synop-raw">${decoded.raw}</div>
-          `;
-          container.appendChild(card);
-        });
+        if (!cached.length) {
+          setStatus("error", "No hay SYNOP en el intervalo seleccionado.");
+        } else {
+          setStatus("ok", `${cached.length} parte(s) — embebidos (en vivo sin datos nuevos)`);
+        }
       } catch (err) {
-        setStatus("error", `Error al consultar OGIMET: ${err.message}`);
+        debugLog(`  ✗ selectStation error: ${err.message}`);
+        if (cached.length) {
+          setStatus(
+            "ok",
+            `${cached.length} parte(s) — embebidos. En vivo falló (CORS/red): ${err.message}`,
+          );
+        } else {
+          setStatus("error", err.message);
+        }
       }
     }
 
