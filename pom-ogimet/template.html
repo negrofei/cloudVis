@@ -161,6 +161,9 @@
     <div>
       <h1>POM OGIMET — Estaciones Argentina</h1>
       <p>__STATION_COUNT__ estaciones · datos embebidos __EMBED_HOURS__ h · generado __BUILT_AT__</p>
+      <p id="hostingHint" style="display:none;font-size:0.8rem;color:var(--warn);margin:4px 0 0">
+        Auto-actualización: esta página se recarga cada 2 min con datos OGIMET frescos (GitHub Pages).
+      </p>
     </div>
     <div class="controls">
       <label for="hours">Horas a mostrar</label>
@@ -501,6 +504,7 @@
     }, REFRESH_MS);
 
     if (AUTO_RELOAD_PAGE) {
+      document.getElementById("hostingHint").style.display = "block";
       setInterval(() => location.reload(), REFRESH_MS);
     }
 
