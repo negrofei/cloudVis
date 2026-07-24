@@ -66,13 +66,40 @@ function isTemperatureGroup(g) {
   return g[0] === '1' && (g[1] === '0' || g[1] === '1');
 }
 
-function isIrixhvvGroup(g) {
-  return g[0] === '1' && !isTemperatureGroup(g);
+function isDewpointGroup(g) {
+  return g[0] === '2' && (g[1] === '0' || g[1] === '1');
 }
 
-function isNddffGroup(g) {
-  const n = Number(g[0]);
-  return n >= 0 && n <= 4 && Number(g.slice(1, 3)) <= 36;
+function isStationPressureGroup(g) {
+  if (g[0] !== '3') return false;
+  const pppp = Number(g.slice(1));
+  return pppp >= 0 && pppp <= 500;
+}
+
+function isSeaLevelPressureGroup(g) {
+  if (g[0] !== '4') return false;
+  const pppp = Number(g.slice(1));
+  return pppp >= 0 && pppp <= 500;
+}
+
+function isIrixhvvGroup(g) {
+  if (!/^\d{5}$/.test(g)) return false;
+  if (isTemperatureGroup(g) || isDewpointGroup(g)) return false;
+  if (isStationPressureGroup(g) || isSeaLevelPressureGroup(g)) return false;
+  const vv = Number(g.slice(3, 5));
+  return vv >= 0 && vv <= 99;
+}
+
+function isWindGroup(g) {
+  if (!/^\d{5}$/.test(g)) return false;
+  const dd = Number(g.slice(1, 3));
+  const ff = Number(g.slice(3));
+  if (dd > 36 || ff > 99) return false;
+  const lead = Number(g[0]);
+  if (lead <= 4) return true;
+  // Argentina: viento en grupos 7ddff / 8ddff (u otros) cuando no hay Nddff estándar
+  if (lead >= 7 && lead <= 9) return true;
+  return false;
 }
 
 function extractSection1Fields(section1) {
@@ -87,54 +114,66 @@ function extractSection1Fields(section1) {
   };
 
   const body = section1.slice(headerEndIndex(section1));
-  let seenIrixhvv = false;
 
   for (const token of body) {
     if (!isFiveDigitGroup(token)) continue;
     const g = token;
-    const ind = g[0];
 
-    if (!seenIrixhvv && isIrixhvvGroup(g)) {
+    if (!fields.irixhvv && isIrixhvvGroup(g)) {
       fields.irixhvv = {
-        ir: Number(g[1]),
-        ix: Number(g[2]),
-        h: Number(g[3]),
+        ir: Number(g[0]),
+        ix: Number(g[1]),
+        h: Number(g[2]),
         vv: Number(g.slice(3, 5)),
       };
-      seenIrixhvv = true;
       continue;
     }
 
-    if (seenIrixhvv && fields.nddff === null && isNddffGroup(g)) {
-      fields.nddff = { n: Number(g[0]), dd: Number(g.slice(1, 3)), ff: Number(g.slice(3)) };
+    if (!fields.nddff && isWindGroup(g)) {
+      fields.nddff = {
+        n: Number(g[0]),
+        dd: Number(g.slice(1, 3)),
+        ff: Number(g.slice(3)),
+      };
       continue;
     }
 
-    if (ind === '1' && isTemperatureGroup(g)) {
+    if (g[0] === '1' && isTemperatureGroup(g) && fields.tempC === null) {
       fields.tempC = signedTemp(g[1], g.slice(2));
       continue;
     }
 
-    if (ind === '2' && (g[1] === '0' || g[1] === '1')) {
+    if (g[0] === '2' && isDewpointGroup(g) && fields.dewpointC === null) {
       fields.dewpointC = signedTemp(g[1], g.slice(2));
       continue;
     }
 
-    if (ind === '3') {
+    if (g[0] === '3' && isStationPressureGroup(g) && fields.stationPressureHpa === null) {
       fields.stationPressureHpa = 1000 + Number(g.slice(1)) / 10;
       continue;
     }
 
-    if (ind === '4') {
+    if (g[0] === '4' && isSeaLevelPressureGroup(g) && fields.seaLevelPressureHpa === null) {
       fields.seaLevelPressureHpa = 1000 + Number(g.slice(1)) / 10;
       continue;
     }
 
-    if (ind === '8' && g[3] !== '/' && g[4] !== '/') {
+    if (g[0] === '8' && g[3] !== '/' && g[4] !== '/' && !fields.nddff) {
+      const dd = Number(g.slice(1, 3));
+      const ff = Number(g.slice(3));
+      if (dd <= 36 && ff <= 99 && ff > 0) {
+        fields.nddff = { n: 4, dd, ff };
+        continue;
+      }
+    }
+
+    if (g[0] === '8' && g[3] !== '/' && g[4] !== '/') {
       const amount = Number(g[1]);
       const typeCode = Number(g[2]);
       const hh = Number(g.slice(3));
-      if (amount > 0) fields.cloudLayers8.push({ amount, typeCode, hh, section: 1 });
+      if (amount > 0 && typeCode <= 9) {
+        fields.cloudLayers8.push({ amount, typeCode, hh, section: 1 });
+      }
     }
   }
 
@@ -149,7 +188,7 @@ function extractCloudLayers(groups, section) {
     const amount = Number(token[1]);
     const typeCode = Number(token[2]);
     const hh = Number(token.slice(3));
-    if (amount > 0 && !Number.isNaN(typeCode) && !Number.isNaN(hh)) {
+    if (amount > 0 && typeCode <= 9 && !Number.isNaN(hh)) {
       layers.push({ amount, typeCode, hh, section });
     }
   }

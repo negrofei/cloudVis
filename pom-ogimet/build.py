@@ -135,8 +135,10 @@ def fetch_synops_argentina(hours: int, station_ids: set[str]) -> dict[str, list[
 def build_html(
     stations: list[dict],
     default_hours: int,
+    embed_hours: int,
     embedded_synops: dict[str, list[dict]],
     built_at_iso: str,
+    auto_reload_page: bool,
     template_path: Path,
     decoder_path: Path,
 ) -> str:
@@ -150,14 +152,23 @@ def build_html(
     html = html.replace("__STATIONS_JSON__", stations_json)
     html = html.replace("__EMBEDDED_SYNOPS_JSON__", synops_json)
     html = html.replace("__DEFAULT_HOURS__", str(default_hours))
+    html = html.replace("__EMBED_HOURS__", str(embed_hours))
     html = html.replace("__BUILT_AT__", built_at_iso)
     html = html.replace("__STATION_COUNT__", str(len(stations)))
+    html = html.replace("__AUTO_RELOAD_PAGE__", "true" if auto_reload_page else "false")
     return html
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build pom-ogimet static HTML")
-    parser.add_argument("--hours", type=int, default=3, help="Default SYNOP lookback hours")
+    parser.add_argument("--hours", type=int, default=3, help="Default lookback hours in the UI slider")
+    parser.add_argument(
+        "--embed-hours",
+        type=int,
+        default=24,
+        help="Hours of SYNOP data to embed in HTML (max lookback available offline)",
+    )
+    parser.add_argument("--auto-reload-page", action="store_true", help="Reload browser page every 2 min (for gh-pages)")
     parser.add_argument("--no-embed-synops", action="store_true", help="Skip embedding recent SYNOP data")
     parser.add_argument("--output", type=Path, default=HERE / "index.html")
     parser.add_argument("--template", type=Path, default=HERE / "template.html")
@@ -171,13 +182,22 @@ def main() -> None:
     station_ids = {s["wmo_id"] for s in stations}
     embedded: dict[str, list[dict]] = {}
     if not args.no_embed_synops:
-        print(f"Downloading SYNOP (últimas {args.hours} h, Argentina) para embeber en HTML...")
-        embedded = fetch_synops_argentina(args.hours, station_ids)
+        print(f"Downloading SYNOP (últimas {args.embed_hours} h, Argentina) para embeber en HTML...")
+        embedded = fetch_synops_argentina(args.embed_hours, station_ids)
         with_data = sum(1 for rows in embedded.values() if rows)
         print(f"  {with_data} estaciones con al menos un SYNOP embebido")
 
     built_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    html = build_html(stations, args.hours, embedded, built_at, args.template, args.decoder)
+    html = build_html(
+        stations,
+        args.hours,
+        args.embed_hours,
+        embedded,
+        built_at,
+        args.auto_reload_page,
+        args.template,
+        args.decoder,
+    )
     args.output.write_text(html, encoding="utf-8")
     print(f"Wrote {args.output} ({len(html) / 1024:.0f} KB)")
 

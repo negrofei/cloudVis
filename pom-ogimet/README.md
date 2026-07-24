@@ -12,10 +12,13 @@ Herramienta web **autocontenida** para compartir con el equipo: un solo archivo 
 
 **Zoom del mapa:** rueda del mouse o botones +/- en la barra de Plotly (arriba a la derecha del mapa).
 
-**Debug de red:** activá «Mostrar debug de red» en el panel derecho. La cadena de llamadas es:
-`selectStation()` → `fetchSynops()` → `fetchText()` → OGIMET (o proxy CORS).
+**Horas en el selector:** el HTML embebe hasta **24 h** de SYNOP al generarse (`--embed-hours`). Si pedís 6 h en el selector, verás hasta 6 partes **si existen en esos datos embebidos**. No es un límite de 3 h fijo: el build anterior usaba solo 3 h embebidas.
 
-OGIMET no permite `fetch` directo desde `file://` (origen `null`); eso es normal. Los datos embebidos evitan depender de la red.
+**Actualización cada 2 minutos:**
+- El navegador **intenta** consultar OGIMET en vivo cada 2 min (suele fallar por CORS desde `file://`).
+- **Solución fiable:** regenerar el HTML en Colab (o GitHub Actions cada 2 min en [GitHub Pages](https://negrofei.github.io/cloudVis/)) con datos OGIMET frescos embebidos.
+
+**Debug de red:** activá «Mostrar debug de red». Cadena: `selectStation()` → `refreshSelectedStation()` → `fetchSynops()` → `fetchText()`.
 
 ---
 

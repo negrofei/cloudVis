@@ -160,12 +160,13 @@
   <header>
     <div>
       <h1>POM OGIMET — Estaciones Argentina</h1>
-      <p>__STATION_COUNT__ estaciones · generado __BUILT_AT__ · clic en un punto para ver SYNOP/AEROMET</p>
+      <p>__STATION_COUNT__ estaciones · datos embebidos __EMBED_HOURS__ h · generado __BUILT_AT__</p>
     </div>
     <div class="controls">
-      <label for="hours">Horas hacia atrás</label>
-      <input id="hours" type="number" min="1" max="72" value="__DEFAULT_HOURS__" />
-      <button id="refreshBtn" type="button">Actualizar estación</button>
+      <label for="hours">Horas a mostrar</label>
+      <input id="hours" type="number" min="1" max="__EMBED_HOURS__" value="__DEFAULT_HOURS__" />
+      <button id="refreshBtn" type="button">Actualizar</button>
+      <span id="lastUpdate" style="font-size:0.75rem;color:var(--muted)"></span>
     </div>
   </header>
   <main>
@@ -189,18 +190,23 @@
   <script>
     const STATIONS = __STATIONS_JSON__;
     const EMBEDDED_SYNOPS = __EMBEDDED_SYNOPS_JSON__;
+    const EMBED_HOURS = __EMBED_HOURS__;
+    const BUILT_AT = "__BUILT_AT__";
+    const AUTO_RELOAD_PAGE = __AUTO_RELOAD_PAGE__;
+    const REFRESH_MS = 120000;
     const OGIMET_URL = "https://www.ogimet.com/cgi-bin/getsynop";
 
-    // OGIMET no envía cabeceras CORS → desde file:// o cualquier web app hay que usar proxy.
     const CORS_PROXIES = [
       (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
       (url) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
-      (url) => `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(url)}`,
     ];
 
     let selectedStation = null;
     let mapInitialized = false;
     let mapView = { center: { lat: -38.5, lon: -63.5 }, zoom: 3.4 };
+    let runtimeSynops = {};
+    let liveFetchInFlight = null;
+    let lastDataSource = "embebidos";
     const plotConfig = {
       responsive: true,
       displayModeBar: true,
@@ -240,22 +246,15 @@
       return { begin: fmt(start), end: fmt(end) };
     }
 
-    async function fetchText(url) {
+    async function fetchText(url, { quiet = false } = {}) {
       const isFile = location.protocol === "file:" || location.origin === "null";
-      debugLog(`fetchText() → ${url}`);
-      if (isFile) {
-        debugLog("  origen file:// — se omite fetch directo (CORS bloqueado)");
-      } else {
+      if (!quiet) debugLog(`fetchText() → ${url}`);
+      if (!isFile) {
         try {
-          debugLog("  intento 1: fetch directo a OGIMET");
           const res = await fetch(url);
-          if (res.ok) {
-            debugLog("  ✓ fetch directo OK");
-            return await res.text();
-          }
-          debugLog(`  ✗ fetch directo HTTP ${res.status}`);
+          if (res.ok) return await res.text();
         } catch (err) {
-          debugLog(`  ✗ fetch directo: ${err.message}`);
+          if (!quiet) debugLog(`  ✗ directo: ${err.message}`);
         }
       }
 
@@ -263,56 +262,41 @@
       for (let i = 0; i < CORS_PROXIES.length; i += 1) {
         const proxyUrl = CORS_PROXIES[i](url);
         try {
-          debugLog(`  intento ${i + 2}: proxy ${proxyUrl.slice(0, 60)}…`);
           const res = await fetch(proxyUrl);
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const text = await res.text();
-          if (!text || text.length < 20) throw new Error("respuesta vacía");
-          debugLog(`  ✓ proxy ${i + 1} OK (${text.length} bytes)`);
+          if (!text || text.length < 20 || !text.includes("WMO_ID")) {
+            throw new Error("respuesta inválida");
+          }
+          if (!quiet) debugLog(`  ✓ proxy ${i + 1} OK`);
           return text;
         } catch (err) {
           lastError = err;
-          debugLog(`  ✗ proxy ${i + 1}: ${err.message}`);
+          if (!quiet) debugLog(`  ✗ proxy ${i + 1}: ${err.message}`);
         }
       }
 
-      // allorigins JSON fallback
       try {
         const jsonUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
-        debugLog(`  intento final: allorigins JSON`);
         const res = await fetch(jsonUrl);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const payload = await res.json();
-        if (payload.contents) {
-          debugLog(`  ✓ allorigins JSON OK (${payload.contents.length} bytes)`);
-          return payload.contents;
-        }
-        throw new Error("sin campo contents");
+        if (payload.contents && payload.contents.includes("WMO_ID")) return payload.contents;
       } catch (err) {
-        debugLog(`  ✗ allorigins JSON: ${err.message}`);
         lastError = err;
       }
 
-      throw new Error(
-        `No se pudo consultar OGIMET (${lastError?.message || "red"}). `
-        + "Activá «Mostrar debug de red» para ver el detalle. "
-        + "Cadena: selectStation() → fetchSynops() → fetchText()."
-      );
+      throw new Error(lastError?.message || "sin conexión a OGIMET (CORS)");
     }
 
-    async function fetchSynops(wmoId, hoursBack) {
+    async function fetchSynops(wmoId, hoursBack, { quiet = false } = {}) {
       const { begin, end } = utcRange(hoursBack);
       const ind = wmoId.length === 5 ? `0${wmoId}` : wmoId;
-      const params = new URLSearchParams({
-        begin, end, ind, header: "yes", lang: "eng",
-      });
+      const params = new URLSearchParams({ begin, end, ind, header: "yes", lang: "eng" });
       const url = `${OGIMET_URL}?${params}`;
-      debugLog(`fetchSynops(wmoId=${wmoId}, hours=${hoursBack})`);
-      debugLog(`  ind OGIMET=${ind}, rango UTC ${begin}–${end}`);
-      const csv = await fetchText(url);
-      const rows = parseOgimetCsv(csv).filter((row) => row.wmoId === wmoId);
-      debugLog(`  parseOgimetCsv → ${rows.length} parte(s) para ${wmoId}`);
-      return rows;
+      if (!quiet) debugLog(`fetchSynops(${wmoId}, ${hoursBack}h)`);
+      const csv = await fetchText(url, { quiet });
+      return parseOgimetCsv(csv).filter((row) => row.wmoId === wmoId);
     }
 
     function embeddedRows(wmoId, hoursBack) {
@@ -407,63 +391,118 @@
       el.textContent = message;
     }
 
+    function rowsForStation(wmoId, hoursBack) {
+      const cutoff = Date.now() - hoursBack * 3600 * 1000;
+      const fromEmbedded = embeddedRows(wmoId, hoursBack);
+      const fromLive = (runtimeSynops[wmoId] || []).filter((r) => r.datetimeUtc.getTime() >= cutoff);
+      const merged = new Map();
+      [...fromEmbedded, ...fromLive].forEach((r) => {
+        const key = r.datetimeUtc.toISOString();
+        merged.set(key, r);
+      });
+      return [...merged.values()].sort((a, b) => b.datetimeUtc - a.datetimeUtc);
+    }
+
+    function updateLastUpdateLabel(source) {
+      lastDataSource = source;
+      const el = document.getElementById("lastUpdate");
+      const now = new Date().toISOString().slice(11, 16) + " UTC";
+      el.textContent = source === "vivo"
+        ? `vivo ${now}`
+        : `embebido ${BUILT_AT}`;
+    }
+
+    async function refreshSelectedStation({ quiet = false } = {}) {
+      if (!selectedStation) return;
+      const station = selectedStation;
+      const hours = Math.min(
+        Number(document.getElementById("hours").value) || 3,
+        EMBED_HOURS,
+      );
+
+      const cached = rowsForStation(station.wmo_id, hours);
+      if (cached.length) {
+        renderReports(cached, station, lastDataSource === "vivo" ? "OGIMET en vivo" : `embebidos (hasta ${EMBED_HOURS}h)`);
+      }
+
+      if (liveFetchInFlight) return liveFetchInFlight;
+
+      liveFetchInFlight = (async () => {
+        try {
+          const rows = await fetchSynops(station.wmo_id, hours, { quiet });
+          if (rows.length) {
+            runtimeSynops[station.wmo_id] = rows;
+            renderReports(rowsForStation(station.wmo_id, hours), station, "OGIMET en vivo");
+            updateLastUpdateLabel("vivo");
+            if (!quiet) debugLog(`  ✓ ${rows.length} parte(s) en vivo`);
+          } else if (!cached.length) {
+            setStatus("error", `Sin SYNOP en las últimas ${hours} h.`);
+          }
+        } catch (err) {
+          if (!quiet) debugLog(`  en vivo no disponible: ${err.message}`);
+          if (cached.length) {
+            setStatus(
+              "ok",
+              `${cached.length} parte(s) — embebidos (${BUILT_AT}). En vivo bloqueado por CORS; regenerá el HTML en Colab cada ~2 min.`,
+            );
+            updateLastUpdateLabel("embebido");
+          } else if (!quiet) {
+            setStatus("error", `Sin datos embebidos ni en vivo: ${err.message}`);
+          }
+        } finally {
+          liveFetchInFlight = null;
+        }
+      })();
+
+      return liveFetchInFlight;
+    }
+
     async function selectStation(station) {
       selectedStation = station;
       renderMap();
 
-      const hours = Number(document.getElementById("hours").value) || 3;
+      const hours = Math.min(Number(document.getElementById("hours").value) || 3, EMBED_HOURS);
       document.getElementById("panelTitle").textContent = station.name;
       document.getElementById("panelMeta").textContent = (
         `WMO ${station.wmo_id} · ${station.lat.toFixed(3)}°, ${station.lon.toFixed(3)}°`
         + (station.alt != null ? ` · ${station.alt} m` : "")
+        + ` · embebido hasta ${EMBED_HOURS}h`
       );
-      document.getElementById("reports").innerHTML = "";
       clearDebug();
       if (document.getElementById("debugToggle").checked) {
-        debugLog(`selectStation("${station.name}", wmo=${station.wmo_id})`);
+        debugLog(`selectStation() → refreshSelectedStation() → fetchSynops() → fetchText()`);
+        debugLog(`  estación ${station.name} (${station.wmo_id}), mostrar ${hours}h`);
       }
 
-      const cached = embeddedRows(station.wmo_id, hours);
+      const cached = rowsForStation(station.wmo_id, hours);
       if (cached.length) {
-        debugLog(`  caché embebido: ${cached.length} parte(s)`);
-        renderReports(cached, station, "datos embebidos (sin red)");
+        renderReports(cached, station, `embebidos (hasta ${EMBED_HOURS}h)`);
+        updateLastUpdateLabel("embebido");
       } else {
-        setStatus("loading", `Cargando SYNOP (últimas ${hours} h)…`);
+        setStatus("loading", `Buscando SYNOP (últimas ${hours} h)…`);
       }
 
-      try {
-        debugLog("  intentando actualización en vivo vía fetchSynops()…");
-        const rows = await fetchSynops(station.wmo_id, hours);
-        if (rows.length) {
-          renderReports(rows, station, "OGIMET en vivo");
-          return;
-        }
-        if (!cached.length) {
-          setStatus("error", "No hay SYNOP en el intervalo seleccionado.");
-        } else {
-          setStatus("ok", `${cached.length} parte(s) — embebidos (en vivo sin datos nuevos)`);
-        }
-      } catch (err) {
-        debugLog(`  ✗ selectStation error: ${err.message}`);
-        if (cached.length) {
-          setStatus(
-            "ok",
-            `${cached.length} parte(s) — embebidos. En vivo falló (CORS/red): ${err.message}`,
-          );
-        } else {
-          setStatus("error", err.message);
-        }
-      }
+      await refreshSelectedStation({ quiet: !document.getElementById("debugToggle").checked });
     }
 
     document.getElementById("refreshBtn").addEventListener("click", () => {
-      if (selectedStation) selectStation(selectedStation);
+      if (selectedStation) refreshSelectedStation({ quiet: false });
     });
 
     document.getElementById("hours").addEventListener("change", () => {
-      const h = document.getElementById("hours").value;
+      const h = Math.min(Number(document.getElementById("hours").value) || 3, EMBED_HOURS);
+      document.getElementById("hours").value = h;
       document.getElementById("hoursLabel").textContent = h;
+      if (selectedStation) refreshSelectedStation({ quiet: true });
     });
+
+    setInterval(() => {
+      if (selectedStation) refreshSelectedStation({ quiet: true });
+    }, REFRESH_MS);
+
+    if (AUTO_RELOAD_PAGE) {
+      setInterval(() => location.reload(), REFRESH_MS);
+    }
 
     renderMap();
   </script>
