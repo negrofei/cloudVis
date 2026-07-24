@@ -1,0 +1,33 @@
+name: POM OGIMET — rebuild pages
+
+on:
+  schedule:
+    - cron: "*/2 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r pom-ogimet/requirements.txt
+
+      - name: Build index.html with 24h embedded SYNOP
+        run: python pom-ogimet/build.py --embed-hours 24 --hours 3 --auto-reload-page
+
+      - name: Deploy to gh-pages
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          folder: pom-ogimet
+          branch: gh-pages
+          single-commit: true
