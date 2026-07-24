@@ -1,19 +1,37 @@
 # Publicar POM OGIMET en GitHub Pages (URL fija para todo el equipo)
 
-**URL del mapa (cuando Pages esté activo):** https://negrofei.github.io/cloudVis/
+**URL del mapa:** https://negrofei.github.io/cloudVis/
 
 ---
 
-## Paso 1 — Activar GitHub Pages (lo más importante)
+## Si ves error 404 «There isn't a GitHub Pages site here»
 
-1. Abrí https://github.com/negrofei/cloudVis/settings/pages  
+El **workflow puede haber salido OK** y aun así la URL da 404. Son dos cosas distintas:
+
+| Qué | Estado |
+|-----|--------|
+| Workflow `pom-ogimet-pages` | Sube archivos a la rama `gh-pages` ✓ |
+| **Settings → Pages** | Hay que activarlo **a mano** (una sola vez) |
+
+### Activar Pages (obligatorio)
+
+1. Abrí **https://github.com/negrofei/cloudVis/settings/pages**  
+   (tenés que ser dueño o admin del repo)
+
 2. En **Build and deployment** → **Source**:
-   - Elegí **Deploy from a branch**
+   - **Deploy from a branch** (no «GitHub Actions» por ahora)
    - **Branch:** `gh-pages`
    - **Folder:** `/ (root)`
+
 3. Clic en **Save**
 
-En 1–2 minutos la URL debería funcionar. La rama `gh-pages` **ya existe** en el repo con `index.html` listo.
+4. Arriba debería aparecer:  
+   `Your site is live at https://negrofei.github.io/cloudVis/`  
+   (puede tardar **2–10 minutos** la primera vez)
+
+5. Si sigue 404, probá en incógnito o esperá 10 min y recargá.
+
+La rama `gh-pages` ya tiene `index.html` en la raíz (el workflow lo subió bien).
 
 ---
 

@@ -199,6 +199,8 @@ def main() -> None:
         args.decoder,
     )
     args.output.write_text(html, encoding="utf-8")
+    # Evita que Jekyll en GitHub Pages ignore o rompa el HTML estático
+    (args.output.parent / ".nojekyll").write_text("", encoding="utf-8")
     print(f"Wrote {args.output} ({len(html) / 1024:.0f} KB)")
 
 
