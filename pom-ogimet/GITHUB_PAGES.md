@@ -1,97 +1,73 @@
 # Publicar POM OGIMET en GitHub Pages (URL fija para todo el equipo)
 
-Con GitHub Pages tenés **una sola URL** que el equipo abre en el navegador. No hace falta descargar `index.html` cada vez.
-
-Los datos se **actualizan solos** cada ~2 minutos: un robot en GitHub descarga SYNOP de OGIMET, regenera el HTML y lo publica. La página se recarga sola.
+**URL del mapa (cuando Pages esté activo):** https://negrofei.github.io/cloudVis/
 
 ---
 
-## Cómo funciona (resumen)
+## Paso 1 — Activar GitHub Pages (lo más importante)
 
-```
-GitHub Actions (cada 2 min)
-    → python build.py (descarga OGIMET, embebe 24 h de SYNOP)
-    → sube index.html a la rama gh-pages
+1. Abrí https://github.com/negrofei/cloudVis/settings/pages  
+2. En **Build and deployment** → **Source**:
+   - Elegí **Deploy from a branch**
+   - **Branch:** `gh-pages`
+   - **Folder:** `/ (root)`
+3. Clic en **Save**
 
-Usuario abre en el navegador
-    → https://negrofei.github.io/cloudVis/
-    → la página se recarga cada 2 min con datos nuevos
-```
-
-OGIMET **no permite** consultas directas desde el navegador (CORS). Por eso la actualización “en vivo” la hace GitHub en el servidor, no el `index.html` en la PC de cada usuario.
+En 1–2 minutos la URL debería funcionar. La rama `gh-pages` **ya existe** en el repo con `index.html` listo.
 
 ---
 
-## Pasos para activarlo (una sola vez)
+## Paso 2 — Activar GitHub Actions (para actualización automática)
 
-### 1. Fusionar el código en `main`
+Si en la pestaña **Actions** no ves workflows ni el botón **Run workflow**, suele ser porque Actions no está habilitado todavía.
 
-Si todavía no fusionaste el PR de `pom-ogimet`, hacelo desde GitHub:
+### A) Primera vez en Actions
 
-**Pull requests → [#4](https://github.com/negrofei/cloudVis/pull/4) → Merge**
+1. https://github.com/negrofei/cloudVis/actions  
+2. Si aparece un cartel verde **「I understand my workflows, go ahead and enable them」** → hacé clic.  
+3. Recargá la página.
 
-(O desde terminal: `git checkout main && git merge pom-ogimet && git push`)
+### B) Encontrar el workflow y ejecutarlo
 
-### 2. Activar GitHub Pages
+1. En el **menú izquierdo** de Actions, buscá **`pom-ogimet-pages`** (no en el centro de la pantalla).  
+2. Hacé clic en ese nombre.  
+3. A la **derecha**, arriba de la lista de ejecuciones, debería aparecer **「Run workflow」** (solo si tenés permisos de escritura en el repo).  
+4. Dejá branch `main` → **Run workflow**.
 
-1. Entrá al repo: https://github.com/negrofei/cloudVis  
-2. **Settings** → menú izquierdo **Pages**  
-3. En **Build and deployment**:
-   - **Source:** `Deploy from a branch`
-   - **Branch:** `gh-pages` → carpeta `/ (root)` → **Save**
+**Enlace directo al workflow:**  
+https://github.com/negrofei/cloudVis/actions/workflows/pom-ogimet-pages.yml
 
-> La rama `gh-pages` se crea sola la primera vez que corre el workflow. Si no existe todavía, pasá al paso 3 y volvé acá después.
+### C) Si no aparece «Run workflow»
 
-### 3. Ejecutar el workflow la primera vez
+| Causa | Qué hacer |
+|-------|-----------|
+| No sos admin/colaborador con escritura | Pedile al dueño del repo (`negrofei`) que ejecute el workflow o te dé acceso |
+| Actions deshabilitado en el org | Settings → Actions → General → permitir acciones |
+| Estás en un fork | Los workflows se ejecutan en el repo original, no en el fork |
 
-1. Pestaña **Actions**  
-2. Workflow **「POM OGIMET — rebuild pages」**  
-3. **Run workflow** → **Run workflow** (botón verde)
+**Mientras tanto:** la página en GitHub Pages **ya funciona** con los datos del último deploy; solo no se actualizará sola hasta que Actions corra.
 
-Esperá 1–2 minutos. Debería aparecer la rama `gh-pages` con `index.html`.
+---
 
-### 4. Verificar la URL
-
-Abrí en el navegador:
+## Paso 3 — Compartir con el equipo
 
 **https://negrofei.github.io/cloudVis/**
 
-(Settings → Pages también muestra la URL cuando está activo.)
+Cualquier persona con el enlace puede abrirlo (repo público). No hace falta cuenta GitHub.
 
 ---
 
-## Compartir con compañeros
+## Cómo se actualizan los datos
 
-| Tipo de repo | ¿Quién puede ver la página? |
-|--------------|----------------------------|
-| **Público** | Cualquiera con el enlace (no necesitan cuenta GitHub) |
-| **Privado** | Solo colaboradores del repo (plan Free: Pages del repo privado son públicos en la práctica para la URL; en planes Team+ podés restringir) |
+| Mecanismo | Frecuencia |
+|-----------|------------|
+| Workflow `pom-ogimet-pages` | Cada ~5 min (cuando Actions está activo) |
+| Recarga de la página en Pages | Cada 2 min (automática) |
 
-**Para el equipo:** mandales el link `https://negrofei.github.io/cloudVis/` por mail, Teams, Slack, etc. No instalan nada.
-
----
-
-## Frecuencia de actualización
-
-- El workflow está programado cada **2 minutos** (`cron: */2 * * * *`).
-- GitHub a veces retrasa jobs programados unos minutos (límite de la plataforma).
-- La página publicada en Pages usa `--auto-reload-page`: se **recarga sola** cada 2 min en el navegador.
-
-Si querés menos carga en GitHub Actions, editá `.github/workflows/pom-ogimet-pages.yml` y cambiá el cron a `*/5 * * * *` (cada 5 min).
+El workflow descarga SYNOP de OGIMET en el servidor de GitHub y regenera `index.html`.
 
 ---
 
-## Solución de problemas
+## Regenerar manualmente (sin Actions)
 
-| Problema | Qué hacer |
-|----------|-----------|
-| 404 en la URL | Verificar que `gh-pages` existe y Pages apunta a esa rama |
-| Workflow no corre solo | El workflow debe estar en la rama **`main`** |
-| Actions deshabilitadas | Settings → Actions → General → permitir workflows |
-| Datos viejos | Actions → último run → ver si falló `build.py` (OGIMET caído) |
-
----
-
-## Alternativa sin GitHub Pages
-
-Seguir usando `index.html` local: regenerarlo en [Colab](https://colab.research.google.com/github/negrofei/cloudVis/blob/pom-ogimet/pom-ogimet/build_colab.ipynb) cuando necesiten datos frescos. Es manual; Pages es la opción “siempre encendida”.
+[Notebook Colab](https://colab.research.google.com/github/negrofei/cloudVis/blob/main/pom-ogimet/build_colab.ipynb) → Run all → descargás `index.html`.
